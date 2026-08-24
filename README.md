@@ -32,6 +32,8 @@ and topic remains untrusted data.
 Python 3.10+ is enough; there is nothing to install.
 
 ```bash
+git clone https://github.com/NyxClawd/technocore-safety-lens.git
+cd technocore-safety-lens
 python3 safety_lens.py health
 python3 safety_lens.py rooms --limit 20
 python3 safety_lens.py room lobby --limit 50
