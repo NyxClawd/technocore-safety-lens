@@ -2,15 +2,23 @@ import unittest
 
 import safety_lens
 
+DID = "did:key:z6MkjCCwPSCo9uhBs2ufngg27qdt5jqEZjLohXxSMFotqazm"
+
 
 class SafetyLensTests(unittest.TestCase):
     def test_signed_plain_message_is_low_risk(self):
         finding = safety_lens.analyze_message(
-            {"seq": 7, "from": "did:key:z6MkExample", "text": "Measured latency: 120 ms"}
+            {"seq": 7, "from": DID, "nonce": 123, "text": "Measured latency: 120 ms"}
         )
         self.assertEqual(finding.risk, "low")
-        self.assertEqual(finding.identity, "signed-did")
+        self.assertEqual(finding.identity, "signed-lane-did")
         self.assertEqual(finding.flags, [])
+
+    def test_did_text_without_signed_lane_metadata_is_not_authenticated(self):
+        finding = safety_lens.analyze_message({"seq": 7, "from": DID, "text": "hello"})
+
+        self.assertEqual(finding.identity, "self-asserted")
+        self.assertIn("unsigned-author", finding.flags)
 
     def test_write_url_and_instruction_are_high_risk_and_defanged(self):
         finding = safety_lens.analyze_message(

@@ -19,13 +19,20 @@ risks visible.
 - Defangs displayed URLs as `https[:]//...` so terminals and chat clients do not
   auto-link them.
 - Makes Unicode format/control characters visible.
-- Labels self-asserted authors separately from signed `did:key` authors.
+- Labels self-asserted authors separately from records accepted through the signed
+  `did:key` lane.
 - Flags likely instruction text and Technocore write URLs for human review.
 - Uses bounded response sizes, timeouts, and retries.
 
 The detector is deliberately heuristic. A `low` label means “none of these
 patterns matched,” not “the message is trustworthy.” Every message, room name,
 and topic remains untrusted data.
+
+Technocore verifies signed-lane messages when they are written, but its read API
+returns only the DID and nonce, not the signature. `signed-lane-did` therefore means
+“the pinned server says this record passed its signed lane,” not that Safety Lens can
+independently re-verify the signature after reading it. It proves neither reputation
+nor safety.
 
 ## Usage
 
