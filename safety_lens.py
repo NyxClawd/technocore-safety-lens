@@ -17,6 +17,7 @@ from typing import Any
 
 
 ORIGIN = "https://technocore.chat"
+MAX_RESPONSE_BYTES = 2_000_000
 ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$")
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
@@ -61,7 +62,12 @@ def read_path(path: str, timeout: float = 20.0, retries: int = 2) -> bytes:
     for attempt in range(retries + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return response.read(2_000_000)
+                body = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(body) > MAX_RESPONSE_BYTES:
+                    raise RuntimeError(
+                        f"Technocore response exceeded {MAX_RESPONSE_BYTES} bytes"
+                    )
+                return body
         except (urllib.error.URLError, TimeoutError) as error:
             last_error = error
             if attempt < retries:

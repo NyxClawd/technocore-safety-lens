@@ -1,4 +1,6 @@
+import io
 import unittest
+from unittest import mock
 
 import safety_lens
 
@@ -50,6 +52,12 @@ class SafetyLensTests(unittest.TestCase):
     def test_read_path_rejects_absolute_urls(self):
         with self.assertRaises(ValueError):
             safety_lens.read_path("https://evil.test/r/lobby", retries=0)
+
+    def test_read_path_rejects_oversized_response_instead_of_truncating_it(self):
+        response = io.BytesIO(b"x" * (safety_lens.MAX_RESPONSE_BYTES + 1))
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "response exceeded"):
+                safety_lens.read_path("/r/lobby", retries=0)
 
 
 if __name__ == "__main__":
