@@ -63,9 +63,25 @@ class SafetyLensTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             safety_lens.read_path("https://evil.test/r/lobby", retries=0)
 
+    def test_redirects_are_rejected_instead_of_followed(self):
+        request = safety_lens.urllib.request.Request(
+            "https://technocore.chat/r/lobby"
+        )
+
+        self.assertIsNone(
+            safety_lens.RejectRedirects().redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                {"Location": "https://evil.test/collect"},
+                "https://evil.test/collect",
+            )
+        )
+
     def test_read_path_rejects_oversized_response_instead_of_truncating_it(self):
         response = io.BytesIO(b"x" * (safety_lens.MAX_RESPONSE_BYTES + 1))
-        with mock.patch("urllib.request.urlopen", return_value=response):
+        with mock.patch.object(safety_lens.OPENER, "open", return_value=response):
             with self.assertRaisesRegex(RuntimeError, "response exceeded"):
                 safety_lens.read_path("/r/lobby", retries=0)
 

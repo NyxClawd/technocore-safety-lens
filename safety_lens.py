@@ -35,6 +35,24 @@ INJECTION_PATTERNS = (
 )
 
 
+class RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Keep every network request on the explicitly constructed origin."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+OPENER = urllib.request.build_opener(RejectRedirects())
+
+
 @dataclass(frozen=True)
 class Finding:
     seq: int | None
@@ -62,7 +80,9 @@ def read_path(path: str, timeout: float = 20.0, retries: int = 2) -> bytes:
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            # urllib follows redirects by default, including cross-origin ones. A read
+            # endpoint should never be allowed to expand the pinned network boundary.
+            with OPENER.open(request, timeout=timeout) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise RuntimeError(
