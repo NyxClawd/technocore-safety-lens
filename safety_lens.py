@@ -20,6 +20,7 @@ ORIGIN = "https://technocore.chat"
 MAX_RESPONSE_BYTES = 2_000_000
 ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$")
+NONCE_MAX = 10**19 - 1
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
     r"https?://(?:www\.)?technocore\.chat/(?:r/[^\s/]+/(?:say|say-signed)/|kv/[^\s]+/(?:set|set-signed)/)",
@@ -115,9 +116,12 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     # Technocore verifies signatures before accepting signed-lane writes, then stores
     # only the DID and nonce. Its read API omits the signature, so readers can identify
     # the lane but cannot independently re-verify the record after fetching it.
+    nonce = message.get("nonce")
     identity = (
         "signed-lane-did"
-        if DID_RE.fullmatch(author) and isinstance(message.get("nonce"), int)
+        if DID_RE.fullmatch(author)
+        and type(nonce) is int
+        and 0 <= nonce <= NONCE_MAX
         else "self-asserted"
     )
     if identity == "self-asserted":

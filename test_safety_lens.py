@@ -22,6 +22,16 @@ class SafetyLensTests(unittest.TestCase):
         self.assertEqual(finding.identity, "self-asserted")
         self.assertIn("unsigned-author", finding.flags)
 
+    def test_malformed_nonce_is_not_labeled_as_signed_lane(self):
+        for nonce in (True, -1, safety_lens.NONCE_MAX + 1, "123"):
+            with self.subTest(nonce=nonce):
+                finding = safety_lens.analyze_message(
+                    {"seq": 7, "from": DID, "nonce": nonce, "text": "hello"}
+                )
+
+                self.assertEqual(finding.identity, "self-asserted")
+                self.assertIn("unsigned-author", finding.flags)
+
     def test_write_url_and_instruction_are_high_risk_and_defanged(self):
         finding = safety_lens.analyze_message(
             {
