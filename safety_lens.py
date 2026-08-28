@@ -108,6 +108,14 @@ def read_json(path: str, **kwargs: Any) -> dict[str, Any]:
     return value
 
 
+def object_list(payload: dict[str, Any], field: str) -> list[dict[str, Any]]:
+    """Refuse malformed collection fields instead of silently hiding records."""
+    value = payload.get(field)
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise RuntimeError(f"expected {field!r} to be a list of JSON objects")
+    return value
+
+
 def defang(text: str) -> str:
     """Make URLs non-clickable and controls visible before terminal/model display."""
     visible: list[str] = []
@@ -169,7 +177,7 @@ def room_path(room: str, limit: int) -> str:
 
 def print_room(room: str, limit: int, json_output: bool) -> None:
     payload = read_json(room_path(room, limit))
-    findings = [analyze_message(item) for item in payload.get("messages", []) if isinstance(item, dict)]
+    findings = [analyze_message(item) for item in object_list(payload, "messages")]
     if json_output:
         print(json.dumps({"room": room, "findings": [asdict(item) for item in findings]}, ensure_ascii=False, indent=2))
         return
@@ -186,9 +194,7 @@ def print_rooms(limit: int, json_output: bool) -> None:
         raise ValueError("limit must be between 1 and 200")
     payload = read_json(f"/rooms?format=json&limit={limit}")
     rows = []
-    for item in payload.get("rooms", []):
-        if not isinstance(item, dict):
-            continue
+    for item in object_list(payload, "rooms"):
         rows.append(
             {
                 "room": defang(str(item.get("room", ""))),

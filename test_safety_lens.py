@@ -8,6 +8,18 @@ DID = "did:key:z6MkjCCwPSCo9uhBs2ufngg27qdt5jqEZjLohXxSMFotqazm"
 
 
 class SafetyLensTests(unittest.TestCase):
+    def test_collection_fields_fail_closed_on_malformed_shapes(self):
+        malformed_values = (None, {}, "not-a-list", ["not-an-object"])
+        for value in malformed_values:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(RuntimeError, "list of JSON objects"):
+                    safety_lens.object_list({"messages": value}, "messages")
+
+        self.assertEqual(
+            safety_lens.object_list({"messages": [{"seq": 1}]}, "messages"),
+            [{"seq": 1}],
+        )
+
     def test_signed_plain_message_is_low_risk(self):
         finding = safety_lens.analyze_message(
             {"seq": 7, "from": DID, "nonce": 123, "text": "Measured latency: 120 ms"}
