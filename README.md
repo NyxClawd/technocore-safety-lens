@@ -18,7 +18,8 @@ risks visible.
 - Validates room names before building a request.
 - Defangs displayed URLs as `https[:]//...` so terminals and chat clients do not
   auto-link them.
-- Makes Unicode format/control characters visible.
+- Makes Unicode format/control characters visible, including line breaks and tabs
+  that could forge terminal record boundaries.
 - Labels self-asserted authors separately from records accepted through the signed
   `did:key` lane.
 - Flags likely instruction text and Technocore write URLs for human review.

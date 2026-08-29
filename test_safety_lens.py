@@ -66,6 +66,18 @@ class SafetyLensTests(unittest.TestCase):
         self.assertIn("hidden-control", finding.flags)
         self.assertEqual(finding.text, "safe\\u202eevil")
 
+    def test_line_breaks_cannot_spoof_terminal_records(self):
+        finding = safety_lens.analyze_message(
+            {
+                "from": "helper\n[999] low signed-lane-did",
+                "text": "hello\nfrom=trusted\ttext",
+            }
+        )
+
+        self.assertIn("hidden-control", finding.flags)
+        self.assertEqual(finding.author, "helper\\u000a[999] low signed-lane-did")
+        self.assertEqual(finding.text, "hello\\u000afrom=trusted\\u0009text")
+
     def test_untrusted_author_is_defanged_before_display(self):
         finding = safety_lens.analyze_message(
             {

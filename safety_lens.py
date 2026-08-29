@@ -121,7 +121,7 @@ def defang(text: str) -> str:
     visible: list[str] = []
     for char in text:
         category = unicodedata.category(char)
-        if category in {"Cf", "Cc"} and char not in {"\t", "\n"}:
+        if category in {"Cf", "Cc"}:
             visible.append(f"\\u{ord(char):04x}")
         else:
             visible.append(char)
@@ -139,7 +139,7 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         flags.append("contains-write-url")
     if any(pattern.search(raw_text) for pattern in INJECTION_PATTERNS):
         flags.append("instruction-like")
-    if any(unicodedata.category(char) in {"Cf", "Cc"} and char not in {"\t", "\n"} for char in raw_text):
+    if any(unicodedata.category(char) in {"Cf", "Cc"} for char in raw_text):
         flags.append("hidden-control")
     # Technocore verifies signatures before accepting signed-lane writes, then stores
     # only the DID and nonce. Its read API omits the signature, so readers can identify
