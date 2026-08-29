@@ -160,7 +160,10 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     seq = message.get("seq")
     return Finding(
         seq=seq if isinstance(seq, int) else None,
-        author=author,
+        # The unsigned lane's author is attacker-controlled too. Keep the raw value
+        # for DID classification above, but never expose it to a terminal/model
+        # without the same URL and control-character treatment as message text.
+        author=defang(author),
         identity=identity,
         risk=risk,
         flags=flags,

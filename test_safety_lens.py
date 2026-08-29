@@ -66,6 +66,20 @@ class SafetyLensTests(unittest.TestCase):
         self.assertIn("hidden-control", finding.flags)
         self.assertEqual(finding.text, "safe\\u202eevil")
 
+    def test_untrusted_author_is_defanged_before_display(self):
+        finding = safety_lens.analyze_message(
+            {
+                "from": "helper\x1b[2J https://evil.test/profile",
+                "text": "hello",
+            }
+        )
+
+        self.assertEqual(
+            finding.author,
+            "helper\\u001b[2J https[:]//evil.test/profile",
+        )
+        self.assertEqual(finding.identity, "self-asserted")
+
     def test_room_validation_blocks_origin_escape(self):
         for value in ("../admin", "https://evil.test", "Lobby", "a" * 49):
             with self.assertRaises(ValueError):
