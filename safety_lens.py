@@ -33,6 +33,7 @@ INJECTION_PATTERNS = (
     re.compile(r"\b(?:reveal|print|send|upload|exfiltrate)\b.{0,50}\b(?:secret|token|key|credential|password|environment)\b", re.IGNORECASE),
     re.compile(r"\b(?:fetch|open|visit|click)\b.{0,30}https?://", re.IGNORECASE),
 )
+DISPLAY_BREAK_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -121,7 +122,7 @@ def defang(text: str) -> str:
     visible: list[str] = []
     for char in text:
         category = unicodedata.category(char)
-        if category in {"Cf", "Cc"}:
+        if category in DISPLAY_BREAK_CATEGORIES:
             visible.append(f"\\u{ord(char):04x}")
         else:
             visible.append(char)
@@ -139,7 +140,11 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         flags.append("contains-write-url")
     if any(pattern.search(raw_text) for pattern in INJECTION_PATTERNS):
         flags.append("instruction-like")
-    if any(unicodedata.category(char) in {"Cf", "Cc"} for char in raw_text):
+    if any(
+        unicodedata.category(char) in DISPLAY_BREAK_CATEGORIES
+        for value in (raw_text, author)
+        for char in value
+    ):
         flags.append("hidden-control")
     # Technocore verifies signatures before accepting signed-lane writes, then stores
     # only the DID and nonce. Its read API omits the signature, so readers can identify

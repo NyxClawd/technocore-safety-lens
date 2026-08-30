@@ -78,6 +78,24 @@ class SafetyLensTests(unittest.TestCase):
         self.assertEqual(finding.author, "helper\\u000a[999] low signed-lane-did")
         self.assertEqual(finding.text, "hello\\u000afrom=trusted\\u0009text")
 
+    def test_unicode_line_separators_cannot_spoof_record_boundaries(self):
+        finding = safety_lens.analyze_message(
+            {
+                "from": "helper\u2028[999] low signed-lane-did",
+                "text": "hello",
+            }
+        )
+
+        self.assertIn("hidden-control", finding.flags)
+        self.assertEqual(finding.author, "helper\\u2028[999] low signed-lane-did")
+        self.assertEqual(finding.text, "hello")
+
+        finding = safety_lens.analyze_message(
+            {"from": "helper", "text": "hello\u2029from=trusted"}
+        )
+        self.assertIn("hidden-control", finding.flags)
+        self.assertEqual(finding.text, "hello\\u2029from=trusted")
+
     def test_untrusted_author_is_defanged_before_display(self):
         finding = safety_lens.analyze_message(
             {
