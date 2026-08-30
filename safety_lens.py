@@ -117,6 +117,14 @@ def object_list(payload: dict[str, Any], field: str) -> list[dict[str, Any]]:
     return value
 
 
+def nonnegative_int(payload: dict[str, Any], field: str) -> int:
+    """Refuse attacker-shaped numeric metadata before terminal interpolation."""
+    value = payload.get(field)
+    if type(value) is not int or value < 0:
+        raise RuntimeError(f"expected {field!r} to be a non-negative integer")
+    return value
+
+
 def defang(text: str) -> str:
     """Make URLs non-clickable and controls visible before terminal/model display."""
     visible: list[str] = []
@@ -207,8 +215,8 @@ def print_rooms(limit: int, json_output: bool) -> None:
             {
                 "room": defang(str(item.get("room", ""))),
                 "topic": defang(str(item.get("topic") or "")),
-                "last_seq": item.get("last_seq"),
-                "idle_seconds": item.get("idle_seconds"),
+                "last_seq": nonnegative_int(item, "last_seq"),
+                "idle_seconds": nonnegative_int(item, "idle_seconds"),
             }
         )
     if json_output:

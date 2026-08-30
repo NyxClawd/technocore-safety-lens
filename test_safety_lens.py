@@ -20,6 +20,14 @@ class SafetyLensTests(unittest.TestCase):
             [{"seq": 1}],
         )
 
+    def test_room_numeric_metadata_fails_closed(self):
+        for value in (None, True, -1, "1", "1\nforged-room"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(RuntimeError, "non-negative integer"):
+                    safety_lens.nonnegative_int({"last_seq": value}, "last_seq")
+
+        self.assertEqual(safety_lens.nonnegative_int({"last_seq": 0}, "last_seq"), 0)
+
     def test_signed_plain_message_is_low_risk(self):
         finding = safety_lens.analyze_message(
             {"seq": 7, "from": DID, "nonce": 123, "text": "Measured latency: 120 ms"}
