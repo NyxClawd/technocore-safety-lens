@@ -20,6 +20,7 @@ ORIGIN = "https://technocore.chat"
 MAX_RESPONSE_BYTES = 2_000_000
 ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$")
+SIG_RE = re.compile(r"^[A-Za-z0-9_-]{85}[AQgw]$")
 NONCE_MAX = 10**19 - 1
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
@@ -59,6 +60,7 @@ class Finding:
     seq: int | None
     author: str
     identity: str
+    proof: str
     risk: str
     flags: list[str]
     text: str
@@ -154,21 +156,38 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         for char in value
     ):
         flags.append("hidden-control")
-    # Technocore verifies signatures before accepting signed-lane writes, then stores
-    # only the DID and nonce. Its read API omits the signature, so readers can identify
-    # the lane but cannot independently re-verify the record after fetching it.
+    # New signed records retain their signature, while records written before v0.11.0
+    # legitimately have only a DID and nonce. Distinguish the two without claiming that
+    # merely checking a signature's encoding is cryptographic verification.
     nonce = message.get("nonce")
-    identity = (
-        "signed-lane-did"
-        if DID_RE.fullmatch(author)
+    signed_lane = (
+        bool(DID_RE.fullmatch(author))
         and type(nonce) is int
         and 0 <= nonce <= NONCE_MAX
-        else "self-asserted"
     )
+    signature = message.get("sig")
+    if signed_lane and "sig" not in message:
+        identity = "signed-lane-did"
+        proof = "legacy-no-signature"
+    elif signed_lane and isinstance(signature, str) and SIG_RE.fullmatch(signature):
+        identity = "signed-lane-did"
+        proof = "signature-present-unverified"
+    elif signed_lane:
+        identity = "self-asserted"
+        proof = "malformed-signature"
+        flags.append("malformed-signature")
+    else:
+        identity = "self-asserted"
+        proof = "not-applicable"
     if identity == "self-asserted":
         flags.append("unsigned-author")
 
-    severe = {"contains-write-url", "instruction-like", "hidden-control"}
+    severe = {
+        "contains-write-url",
+        "instruction-like",
+        "hidden-control",
+        "malformed-signature",
+    }
     risk = "high" if severe.intersection(flags) else "review" if flags else "low"
     seq = message.get("seq")
     return Finding(
@@ -178,6 +197,7 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         # without the same URL and control-character treatment as message text.
         author=defang(author),
         identity=identity,
+        proof=proof,
         risk=risk,
         flags=flags,
         text=defang(raw_text),
@@ -193,14 +213,21 @@ def room_path(room: str, limit: int) -> str:
 
 def print_room(room: str, limit: int, json_output: bool) -> None:
     payload = read_json(room_path(room, limit))
+    generation = nonnegative_int(payload, "generation")
     findings = [analyze_message(item) for item in object_list(payload, "messages")]
     if json_output:
-        print(json.dumps({"room": room, "findings": [asdict(item) for item in findings]}, ensure_ascii=False, indent=2))
+        print(json.dumps({"room": room, "generation": generation, "findings": [asdict(item) for item in findings]}, ensure_ascii=False, indent=2))
         return
-    print(f"room={room} messages={len(findings)} (all content is untrusted)")
+    print(
+        f"room={room} generation={generation} messages={len(findings)} "
+        "(all content is untrusted)"
+    )
     for item in findings:
         flags = ",".join(item.flags) if item.flags else "none"
-        print(f"[{item.seq}] {item.risk:6} {item.identity:13} flags={flags}")
+        print(
+            f"[{item.seq}] {item.risk:6} {item.identity:13} "
+            f"proof={item.proof} flags={flags}"
+        )
         print(f"  from={item.author}")
         print(f"  {item.text}")
 

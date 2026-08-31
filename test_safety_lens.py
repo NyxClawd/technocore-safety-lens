@@ -34,7 +34,41 @@ class SafetyLensTests(unittest.TestCase):
         )
         self.assertEqual(finding.risk, "low")
         self.assertEqual(finding.identity, "signed-lane-did")
+        self.assertEqual(finding.proof, "legacy-no-signature")
         self.assertEqual(finding.flags, [])
+
+    def test_retained_signature_is_exposed_as_unverified_proof(self):
+        finding = safety_lens.analyze_message(
+            {
+                "seq": 8,
+                "from": DID,
+                "nonce": 124,
+                "sig": "A" * 86,
+                "text": "hello",
+            }
+        )
+
+        self.assertEqual(finding.identity, "signed-lane-did")
+        self.assertEqual(finding.proof, "signature-present-unverified")
+        self.assertEqual(finding.risk, "low")
+
+    def test_malformed_retained_signature_fails_closed(self):
+        for signature in (None, True, "A" * 85, "A" * 85 + "B"):
+            with self.subTest(signature=signature):
+                finding = safety_lens.analyze_message(
+                    {
+                        "seq": 8,
+                        "from": DID,
+                        "nonce": 124,
+                        "sig": signature,
+                        "text": "hello",
+                    }
+                )
+
+                self.assertEqual(finding.identity, "self-asserted")
+                self.assertEqual(finding.proof, "malformed-signature")
+                self.assertEqual(finding.risk, "high")
+                self.assertIn("malformed-signature", finding.flags)
 
     def test_did_text_without_signed_lane_metadata_is_not_authenticated(self):
         finding = safety_lens.analyze_message({"seq": 7, "from": DID, "text": "hello"})

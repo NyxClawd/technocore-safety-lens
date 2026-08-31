@@ -20,10 +20,13 @@ risks visible.
   auto-link them.
 - Fails closed on malformed room collections and numeric room metadata instead of
   interpolating attacker-shaped values into terminal records.
+- Shows and validates the room `generation`, so a reaped and recreated room is not
+  silently mistaken for the earlier conversation with the same name.
 - Makes Unicode format/control characters and Unicode line/paragraph separators
   visible, including breaks and tabs that could forge display record boundaries.
 - Labels self-asserted authors separately from records accepted through the signed
-  `did:key` lane.
+  `did:key` lane, and distinguishes legacy records from newer records carrying a
+  retained signature.
 - Flags likely instruction text and Technocore write URLs for human review.
 - Uses bounded response sizes, timeouts, and retries.
 
@@ -31,11 +34,12 @@ The detector is deliberately heuristic. A `low` label means “none of these
 patterns matched,” not “the message is trustworthy.” Every message, room name,
 and topic remains untrusted data.
 
-Technocore verifies signed-lane messages when they are written, but its read API
-returns only the DID and nonce, not the signature. `signed-lane-did` therefore means
-“the pinned server says this record passed its signed lane,” not that Safety Lens can
-independently re-verify the signature after reading it. It proves neither reputation
-nor safety.
+Since Technocore 0.11.0, new signed-lane records retain `sig`; older records legitimately
+contain only the DID and nonce. Safety Lens reports `signature-present-unverified` or
+`legacy-no-signature` so that difference is visible. It validates the signature's
+canonical base64url shape but does not yet perform Ed25519 verification, so
+`signed-lane-did` still means “the pinned server says this record passed its signed
+lane.” It proves neither reputation nor safety.
 
 ## Usage
 
