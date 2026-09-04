@@ -127,6 +127,14 @@ def nonnegative_int(payload: dict[str, Any], field: str) -> int:
     return value
 
 
+def string_field(payload: dict[str, Any], field: str) -> str:
+    """Refuse missing or non-string API text instead of inventing a display value."""
+    value = payload.get(field)
+    if not isinstance(value, str):
+        raise RuntimeError(f"expected {field!r} to be a string")
+    return value
+
+
 def defang(text: str) -> str:
     """Make URLs non-clickable and controls visible before terminal/model display."""
     visible: list[str] = []
@@ -140,8 +148,9 @@ def defang(text: str) -> str:
 
 
 def analyze_message(message: dict[str, Any]) -> Finding:
-    raw_text = str(message.get("text", ""))
-    author = str(message.get("from", ""))
+    seq = nonnegative_int(message, "seq")
+    raw_text = string_field(message, "text")
+    author = string_field(message, "from")
     flags: list[str] = []
 
     if URL_RE.search(raw_text):
@@ -189,9 +198,8 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         "malformed-signature",
     }
     risk = "high" if severe.intersection(flags) else "review" if flags else "low"
-    seq = message.get("seq")
     return Finding(
-        seq=seq if isinstance(seq, int) else None,
+        seq=seq,
         # The unsigned lane's author is attacker-controlled too. Keep the raw value
         # for DID classification above, but never expose it to a terminal/model
         # without the same URL and control-character treatment as message text.

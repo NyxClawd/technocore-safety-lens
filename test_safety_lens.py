@@ -28,6 +28,20 @@ class SafetyLensTests(unittest.TestCase):
 
         self.assertEqual(safety_lens.nonnegative_int({"last_seq": 0}, "last_seq"), 0)
 
+    def test_required_message_fields_fail_closed_on_malformed_shapes(self):
+        valid = {"seq": 1, "from": "alice", "text": "hello"}
+        malformed = (
+            {**valid, "seq": True},
+            {**valid, "seq": -1},
+            {**valid, "from": None},
+            {**valid, "text": {"looks": "safe"}},
+            {"seq": 1, "from": "alice"},
+        )
+        for message in malformed:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(RuntimeError, "expected"):
+                    safety_lens.analyze_message(message)
+
     def test_signed_plain_message_is_low_risk(self):
         finding = safety_lens.analyze_message(
             {"seq": 7, "from": DID, "nonce": 123, "text": "Measured latency: 120 ms"}
@@ -103,7 +117,7 @@ class SafetyLensTests(unittest.TestCase):
 
     def test_controls_become_visible(self):
         finding = safety_lens.analyze_message(
-            {"from": "did:key:z6MkExample", "text": "safe\u202eevil"}
+            {"seq": 1, "from": "did:key:z6MkExample", "text": "safe\u202eevil"}
         )
         self.assertIn("hidden-control", finding.flags)
         self.assertEqual(finding.text, "safe\\u202eevil")
@@ -111,6 +125,7 @@ class SafetyLensTests(unittest.TestCase):
     def test_line_breaks_cannot_spoof_terminal_records(self):
         finding = safety_lens.analyze_message(
             {
+                "seq": 1,
                 "from": "helper\n[999] low signed-lane-did",
                 "text": "hello\nfrom=trusted\ttext",
             }
@@ -123,6 +138,7 @@ class SafetyLensTests(unittest.TestCase):
     def test_unicode_line_separators_cannot_spoof_record_boundaries(self):
         finding = safety_lens.analyze_message(
             {
+                "seq": 1,
                 "from": "helper\u2028[999] low signed-lane-did",
                 "text": "hello",
             }
@@ -133,7 +149,7 @@ class SafetyLensTests(unittest.TestCase):
         self.assertEqual(finding.text, "hello")
 
         finding = safety_lens.analyze_message(
-            {"from": "helper", "text": "hello\u2029from=trusted"}
+            {"seq": 1, "from": "helper", "text": "hello\u2029from=trusted"}
         )
         self.assertIn("hidden-control", finding.flags)
         self.assertEqual(finding.text, "hello\\u2029from=trusted")
@@ -141,6 +157,7 @@ class SafetyLensTests(unittest.TestCase):
     def test_untrusted_author_is_defanged_before_display(self):
         finding = safety_lens.analyze_message(
             {
+                "seq": 1,
                 "from": "helper\x1b[2J https://evil.test/profile",
                 "text": "hello",
             }

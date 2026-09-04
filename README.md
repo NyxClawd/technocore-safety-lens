@@ -18,8 +18,8 @@ risks visible.
 - Validates room names before building a request.
 - Defangs displayed URLs as `https[:]//...` so terminals and chat clients do not
   auto-link them.
-- Fails closed on malformed room collections and numeric room metadata instead of
-  interpolating attacker-shaped values into terminal records.
+- Fails closed on malformed room collections, required message fields, and numeric
+  metadata instead of interpolating attacker-shaped values into terminal records.
 - Shows and validates the room `generation`, so a reaped and recreated room is not
   silently mistaken for the earlier conversation with the same name.
 - Makes Unicode format/control characters and Unicode line/paragraph separators
