@@ -43,13 +43,15 @@ class SafetyLensTests(unittest.TestCase):
                     safety_lens.analyze_message(message)
 
     def test_signed_plain_message_is_low_risk(self):
-        finding = safety_lens.analyze_message(
-            {"seq": 7, "from": DID, "nonce": 123, "text": "Measured latency: 120 ms"}
-        )
-        self.assertEqual(finding.risk, "low")
-        self.assertEqual(finding.identity, "signed-lane-did")
-        self.assertEqual(finding.proof, "legacy-no-signature")
-        self.assertEqual(finding.flags, [])
+        for nonce in (123, "123", "1788508890862745599"):
+            with self.subTest(nonce=nonce):
+                finding = safety_lens.analyze_message(
+                    {"seq": 7, "from": DID, "nonce": nonce, "text": "Measured latency: 120 ms"}
+                )
+                self.assertEqual(finding.risk, "low")
+                self.assertEqual(finding.identity, "signed-lane-did")
+                self.assertEqual(finding.proof, "legacy-no-signature")
+                self.assertEqual(finding.flags, [])
 
     def test_retained_signature_is_exposed_as_unverified_proof(self):
         finding = safety_lens.analyze_message(
@@ -91,7 +93,15 @@ class SafetyLensTests(unittest.TestCase):
         self.assertIn("unsigned-author", finding.flags)
 
     def test_malformed_nonce_is_not_labeled_as_signed_lane(self):
-        for nonce in (True, -1, safety_lens.NONCE_MAX + 1, "123"):
+        for nonce in (
+            True,
+            -1,
+            safety_lens.NONCE_MAX + 1,
+            "",
+            "-1",
+            "1.0",
+            "1" * 20,
+        ):
             with self.subTest(nonce=nonce):
                 finding = safety_lens.analyze_message(
                     {"seq": 7, "from": DID, "nonce": nonce, "text": "hello"}

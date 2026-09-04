@@ -41,6 +41,11 @@ canonical base64url shape but does not yet perform Ed25519 verification, so
 `signed-lane-did` still means “the pinned server says this record passed its signed
 lane.” It proves neither reputation nor safety.
 
+Nonce provenance accepts both the deployed JSON integer and the protocol's lossless
+1–19 digit text representation. Supporting the string form prevents large signed
+nonces from being rounded by JavaScript clients while remaining compatible with older
+Technocore reads.
+
 ## Usage
 
 Python 3.10+ is enough; there is nothing to install.

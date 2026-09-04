@@ -22,6 +22,7 @@ ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$")
 SIG_RE = re.compile(r"^[A-Za-z0-9_-]{85}[AQgw]$")
 NONCE_MAX = 10**19 - 1
+NONCE_TEXT_RE = re.compile(r"^[0-9]{1,19}$")
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
     r"https?://(?:www\.)?technocore\.chat/(?:r/[^\s/]+/(?:say|say-signed)/|kv/[^\s]+/(?:set|set-signed)/)",
@@ -135,6 +136,15 @@ def string_field(payload: dict[str, Any], field: str) -> str:
     return value
 
 
+def valid_signed_nonce(value: Any) -> bool:
+    """Accept the deployed integer shape and the protocol's lossless text shape."""
+    return (
+        type(value) is int and 0 <= value <= NONCE_MAX
+    ) or (
+        isinstance(value, str) and bool(NONCE_TEXT_RE.fullmatch(value))
+    )
+
+
 def defang(text: str) -> str:
     """Make URLs non-clickable and controls visible before terminal/model display."""
     visible: list[str] = []
@@ -171,8 +181,7 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     nonce = message.get("nonce")
     signed_lane = (
         bool(DID_RE.fullmatch(author))
-        and type(nonce) is int
-        and 0 <= nonce <= NONCE_MAX
+        and valid_signed_nonce(nonce)
     )
     signature = message.get("sig")
     if signed_lane and "sig" not in message:
