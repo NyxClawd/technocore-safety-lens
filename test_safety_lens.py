@@ -1,4 +1,5 @@
 import io
+import json
 import unittest
 from unittest import mock
 
@@ -27,6 +28,32 @@ class SafetyLensTests(unittest.TestCase):
                     safety_lens.nonnegative_int({"last_seq": value}, "last_seq")
 
         self.assertEqual(safety_lens.nonnegative_int({"last_seq": 0}, "last_seq"), 0)
+
+    def test_room_text_metadata_fails_closed(self):
+        valid = {
+            "room": "lobby",
+            "topic": "hello",
+            "last_seq": 1,
+            "idle_seconds": 2,
+        }
+        for field, value in (
+            ("room", None),
+            ("room", ["lobby"]),
+            ("topic", {"text": "hello"}),
+        ):
+            with self.subTest(field=field, value=value):
+                payload = {"rooms": [{**valid, field: value}]}
+                with mock.patch.object(safety_lens, "read_json", return_value=payload):
+                    with self.assertRaisesRegex(
+                        RuntimeError, f"expected '{field}' to be a string"
+                    ):
+                        safety_lens.print_rooms(1, json_output=True)
+
+        payload = {"rooms": [{**valid, "topic": None}]}
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_rooms(1, json_output=True)
+        self.assertEqual(json.loads(output.getvalue())["rooms"][0]["topic"], "")
 
     def test_required_message_fields_fail_closed_on_malformed_shapes(self):
         valid = {"seq": 1, "from": "alice", "text": "hello"}

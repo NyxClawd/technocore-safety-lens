@@ -136,6 +136,16 @@ def string_field(payload: dict[str, Any], field: str) -> str:
     return value
 
 
+def optional_string_field(payload: dict[str, Any], field: str) -> str:
+    """Accept the API's null-as-empty text shape, but no other coercion."""
+    value = payload.get(field)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise RuntimeError(f"expected {field!r} to be a string or null")
+    return value
+
+
 def valid_signed_nonce(value: Any) -> bool:
     """Accept the deployed integer shape and the protocol's lossless text shape."""
     return (
@@ -255,10 +265,15 @@ def print_rooms(limit: int, json_output: bool) -> None:
     payload = read_json(f"/rooms?format=json&limit={limit}")
     rows = []
     for item in object_list(payload, "rooms"):
+        # Names and topics are caller-controlled strings, but their JSON types are
+        # still part of the read contract. Do not turn attacker-shaped arrays,
+        # objects, or missing fields into plausible terminal labels with str().
+        room = string_field(item, "room")
+        topic = optional_string_field(item, "topic")
         rows.append(
             {
-                "room": defang(str(item.get("room", ""))),
-                "topic": defang(str(item.get("topic") or "")),
+                "room": defang(room),
+                "topic": defang(topic),
                 "last_seq": nonnegative_int(item, "last_seq"),
                 "idle_seconds": nonnegative_int(item, "idle_seconds"),
             }
