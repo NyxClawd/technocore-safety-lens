@@ -128,6 +128,14 @@ def nonnegative_int(payload: dict[str, Any], field: str) -> int:
     return value
 
 
+def optional_nonnegative_int(payload: dict[str, Any], field: str) -> int | None:
+    """Accept a nullable numeric field without treating booleans as integers."""
+    value = payload.get(field)
+    if value is None:
+        return None
+    return nonnegative_int(payload, field)
+
+
 def string_field(payload: dict[str, Any], field: str) -> str:
     """Refuse missing or non-string API text instead of inventing a display value."""
     value = payload.get(field)
@@ -240,13 +248,39 @@ def room_path(room: str, limit: int) -> str:
 
 def print_room(room: str, limit: int, json_output: bool) -> None:
     payload = read_json(room_path(room, limit))
+    response_room = string_field(payload, "room")
+    if response_room != room:
+        raise RuntimeError(f"expected room {room!r}, received {response_room!r}")
     generation = nonnegative_int(payload, "generation")
     findings = [analyze_message(item) for item in object_list(payload, "messages")]
+    count = nonnegative_int(payload, "count")
+    first_seq = optional_nonnegative_int(payload, "first_seq")
+    last_seq = nonnegative_int(payload, "last_seq")
+    if count != len(findings):
+        raise RuntimeError("room count does not match the returned messages")
+    expected_first = findings[0].seq if findings else None
+    expected_last = findings[-1].seq if findings else 0
+    if first_seq != expected_first or last_seq != expected_last:
+        raise RuntimeError("room sequence window does not match the returned messages")
     if json_output:
-        print(json.dumps({"room": room, "generation": generation, "findings": [asdict(item) for item in findings]}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "room": room,
+                    "generation": generation,
+                    "count": count,
+                    "first_seq": first_seq,
+                    "last_seq": last_seq,
+                    "findings": [asdict(item) for item in findings],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return
     print(
-        f"room={room} generation={generation} messages={len(findings)} "
+        f"room={room} generation={generation} returned={count} "
+        f"window={first_seq}..{last_seq} newest_limit={limit} "
         "(all content is untrusted)"
     )
     for item in findings:

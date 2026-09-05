@@ -29,6 +29,45 @@ class SafetyLensTests(unittest.TestCase):
 
         self.assertEqual(safety_lens.nonnegative_int({"last_seq": 0}, "last_seq"), 0)
 
+        self.assertIsNone(
+            safety_lens.optional_nonnegative_int({"first_seq": None}, "first_seq")
+        )
+        with self.assertRaisesRegex(RuntimeError, "non-negative integer"):
+            safety_lens.optional_nonnegative_int({"first_seq": True}, "first_seq")
+
+    def test_room_window_is_exposed_and_must_match_messages(self):
+        payload = {
+            "room": "lobby",
+            "generation": 2,
+            "count": 2,
+            "first_seq": 8,
+            "last_seq": 9,
+            "messages": [
+                {"seq": 8, "from": "alice", "text": "hello"},
+                {"seq": 9, "from": "bob", "text": "world"},
+            ],
+        }
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("lobby", 2, json_output=True)
+        rendered = json.loads(output.getvalue())
+        self.assertEqual(
+            {key: rendered[key] for key in ("count", "first_seq", "last_seq")},
+            {"count": 2, "first_seq": 8, "last_seq": 9},
+        )
+
+        malformed = (
+            {**payload, "room": "other"},
+            {**payload, "count": 1},
+            {**payload, "first_seq": 7},
+            {**payload, "last_seq": 10},
+        )
+        for value in malformed:
+            with self.subTest(value=value):
+                with mock.patch.object(safety_lens, "read_json", return_value=value):
+                    with self.assertRaisesRegex(RuntimeError, "expected room|does not match"):
+                        safety_lens.print_room("lobby", 2, json_output=True)
+
     def test_room_text_metadata_fails_closed(self):
         valid = {
             "room": "lobby",

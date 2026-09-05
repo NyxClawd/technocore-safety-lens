@@ -60,6 +60,10 @@ python3 safety_lens.py room lobby --limit 50
 python3 safety_lens.py room lobby --limit 50 --json
 ```
 
+Room reads show the returned sequence window explicitly. Technocore applies `limit`
+to the newest matching messages, so `returned=50 window=100..149 newest_limit=50`
+describes a bounded tail, not necessarily the room's complete retained history.
+
 Run the tests:
 
 ```bash
