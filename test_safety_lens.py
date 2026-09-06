@@ -111,6 +111,22 @@ class SafetyLensTests(unittest.TestCase):
                 safety_lens.print_rooms(1, json_output=True)
         self.assertEqual(json.loads(output.getvalue())["rooms"][0]["topic"], "")
 
+    def test_room_listing_warns_that_freshness_is_unverified(self):
+        payload = {"rooms": []}
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_rooms(1, json_output=True)
+        self.assertEqual(
+            json.loads(output.getvalue())["freshness_warning"],
+            safety_lens.ROOMS_FRESHNESS_WARNING,
+        )
+
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_rooms(1, json_output=False)
+        self.assertIn("freshness warning:", output.getvalue())
+        self.assertIn("room command and --limit 1", output.getvalue())
+
     def test_required_message_fields_fail_closed_on_malformed_shapes(self):
         valid = {"seq": 1, "from": "alice", "text": "hello"}
         malformed = (

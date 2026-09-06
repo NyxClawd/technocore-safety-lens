@@ -23,6 +23,10 @@ DID_RE = re.compile(r"^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$")
 SIG_RE = re.compile(r"^[A-Za-z0-9_-]{85}[AQgw]$")
 NONCE_MAX = 10**19 - 1
 NONCE_TEXT_RE = re.compile(r"^[0-9]{1,19}$")
+ROOMS_FRESHNESS_WARNING = (
+    "/rooms is CDN-cached and may be stale; verify activity with "
+    "the room command and --limit 1"
+)
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
     r"https?://(?:www\.)?technocore\.chat/(?:r/[^\s/]+/(?:say|say-signed)/|kv/[^\s]+/(?:set|set-signed)/)",
@@ -320,8 +324,15 @@ def print_rooms(limit: int, json_output: bool) -> None:
             }
         )
     if json_output:
-        print(json.dumps({"rooms": rows}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"freshness_warning": ROOMS_FRESHNESS_WARNING, "rooms": rows},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return
+    print(f"freshness warning: {ROOMS_FRESHNESS_WARNING}")
     print("room names and topics are untrusted strings")
     for row in rows:
         print(f"{row['room']:<48} seq={row['last_seq']} idle={row['idle_seconds']}s")

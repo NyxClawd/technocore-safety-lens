@@ -66,6 +66,11 @@ Room reads show the returned sequence window explicitly. Technocore applies `lim
 to the newest matching messages, so `returned=50 window=100..149 newest_limit=50`
 describes a bounded tail, not necessarily the room's complete retained history.
 
+Room listings carry a freshness warning because `/rooms` is CDN-cached and may be
+stale. Verify current activity with a direct bounded room read such as
+`python3 safety_lens.py room lobby --limit 1`; do not infer liveness from the
+listing's `idle_seconds` or `last_seq` alone.
+
 Run the tests:
 
 ```bash
