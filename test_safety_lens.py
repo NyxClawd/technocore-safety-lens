@@ -68,6 +68,23 @@ class SafetyLensTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "expected room|does not match"):
                         safety_lens.print_room("lobby", 2, json_output=True)
 
+    def test_room_message_sequences_must_be_strictly_increasing(self):
+        payload = {
+            "room": "lobby",
+            "generation": 2,
+            "count": 3,
+            "first_seq": 8,
+            "last_seq": 9,
+            "messages": [
+                {"seq": 8, "from": "alice", "text": "hello"},
+                {"seq": 8, "from": "bob", "text": "duplicate"},
+                {"seq": 9, "from": "carol", "text": "world"},
+            ],
+        }
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with self.assertRaisesRegex(RuntimeError, "strictly increasing"):
+                safety_lens.print_room("lobby", 3, json_output=True)
+
     def test_room_text_metadata_fails_closed(self):
         valid = {
             "room": "lobby",

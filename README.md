@@ -23,6 +23,8 @@ risks visible.
   terminal records.
 - Shows and validates the room `generation`, so a reaped and recreated room is not
   silently mistaken for the earlier conversation with the same name.
+- Validates that every returned message sequence is strictly increasing, not merely
+  that the response's first and last sequence metadata match its endpoints.
 - Makes Unicode format/control characters and Unicode line/paragraph separators
   visible, including breaks and tabs that could forge display record boundaries.
 - Labels self-asserted authors separately from records accepted through the signed

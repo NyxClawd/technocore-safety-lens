@@ -262,6 +262,13 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
     expected_last = findings[-1].seq if findings else 0
     if first_seq != expected_first or last_seq != expected_last:
         raise RuntimeError("room sequence window does not match the returned messages")
+    if any(
+        previous.seq is None
+        or current.seq is None
+        or current.seq <= previous.seq
+        for previous, current in zip(findings, findings[1:])
+    ):
+        raise RuntimeError("room message sequences are not strictly increasing")
     if json_output:
         print(
             json.dumps(
