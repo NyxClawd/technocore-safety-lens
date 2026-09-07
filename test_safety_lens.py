@@ -108,6 +108,48 @@ class SafetyLensTests(unittest.TestCase):
         self.assertIn("retention warning:", output.getvalue())
         self.assertIn("oldest retained sequence", output.getvalue())
 
+    def test_room_read_exposes_live_cache_policy(self):
+        payload = {
+            "room": "lobby",
+            "generation": 0,
+            "count": 0,
+            "first_seq": None,
+            "last_seq": 0,
+            "messages": [],
+        }
+
+        def fake_read_json(_path, response_metadata=None, **_kwargs):
+            response_metadata.update(
+                {
+                    "cache_control": "public, s-maxage=5, stale-while-revalidate=25",
+                    "age": "4",
+                    "cache_status": "HIT",
+                }
+            )
+            return payload
+
+        with mock.patch.object(safety_lens, "read_json", side_effect=fake_read_json):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("lobby", 1, json_output=True)
+
+        rendered = json.loads(output.getvalue())
+        self.assertEqual(rendered["cache"]["maximum_policy_lag_seconds"], 30)
+        self.assertEqual(rendered["cache"]["age_seconds"], 4)
+        self.assertEqual(rendered["cache"]["cache_status"], "HIT")
+        self.assertIn("near-live", rendered["freshness_warning"])
+
+    def test_cache_metadata_refuses_unbounded_numeric_headers(self):
+        rendered = safety_lens.cache_info(
+            {
+                "cache_control": "public, s-maxage=" + "9" * 10000,
+                "age": "9" * 10000,
+                "cache_status": "HIT\nforged",
+            }
+        )
+        self.assertIsNone(rendered["shared_fresh_seconds"])
+        self.assertIsNone(rendered["age_seconds"])
+        self.assertEqual(rendered["cache_status"], "HIT\\u000aforged")
+
     def test_room_text_metadata_fails_closed(self):
         valid = {
             "room": "lobby",
@@ -148,7 +190,7 @@ class SafetyLensTests(unittest.TestCase):
             with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
                 safety_lens.print_rooms(1, json_output=False)
         self.assertIn("freshness warning:", output.getvalue())
-        self.assertIn("room command and --limit 1", output.getvalue())
+        self.assertIn("near-live", output.getvalue())
 
     def test_required_message_fields_fail_closed_on_malformed_shapes(self):
         valid = {"seq": 1, "from": "alice", "text": "hello"}
@@ -173,6 +215,9 @@ class SafetyLensTests(unittest.TestCase):
                 self.assertEqual(finding.risk, "low")
                 self.assertEqual(finding.identity, "signed-lane-did")
                 self.assertEqual(finding.proof, "legacy-no-signature")
+                self.assertEqual(
+                    finding.authenticity, "server-accepted-legacy-unverifiable"
+                )
                 self.assertEqual(finding.flags, [])
 
     def test_retained_signature_is_exposed_as_unverified_proof(self):
@@ -188,7 +233,40 @@ class SafetyLensTests(unittest.TestCase):
 
         self.assertEqual(finding.identity, "signed-lane-did")
         self.assertEqual(finding.proof, "signature-present-unverified")
+        self.assertEqual(
+            finding.authenticity, "server-accepted-signature-unverified"
+        )
         self.assertEqual(finding.risk, "low")
+
+    def test_tclk_frame_requires_review_and_warns_that_it_is_not_an_audit(self):
+        payload = {
+            "room": "tclk-offers",
+            "generation": 1,
+            "count": 1,
+            "first_seq": 8,
+            "last_seq": 8,
+            "messages": [
+                {
+                    "seq": 8,
+                    "from": DID,
+                    "nonce": "124",
+                    "sig": "A" * 86,
+                    "text": 'tclk1 {"type":"offer"}',
+                }
+            ],
+        }
+        finding = safety_lens.analyze_message(payload["messages"][0])
+        self.assertEqual(finding.protocol, "tclk/1")
+        self.assertEqual(finding.risk, "review")
+        self.assertIn("tclk-frame", finding.flags)
+
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("tclk-offers", 1, json_output=True)
+        rendered = json.loads(output.getvalue())
+        self.assertFalse(rendered["cryptographic_verification"])
+        self.assertEqual(rendered["findings"][0]["content_risk"], "review")
+        self.assertIn("not a deal audit", rendered["protocol_warnings"][0])
 
     def test_malformed_retained_signature_fails_closed(self):
         for signature in (None, True, "A" * 85, "A" * 85 + "B"):

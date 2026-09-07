@@ -24,12 +24,20 @@ SIG_RE = re.compile(r"^[A-Za-z0-9_-]{85}[AQgw]$")
 NONCE_MAX = 10**19 - 1
 NONCE_TEXT_RE = re.compile(r"^[0-9]{1,19}$")
 ROOMS_FRESHNESS_WARNING = (
-    "/rooms is CDN-cached and may be stale; verify activity with "
-    "the room command and --limit 1"
+    "/rooms is CDN-cached and may be stale; a direct bounded room read is "
+    "near-live but can also lag the origin under its Cache-Control policy"
+)
+ROOM_FRESHNESS_WARNING = (
+    "direct room reads can be CDN-cached; treat them as near-live, not real-time"
 )
 RETAINED_FLOOR_WARNING = (
     "first_seq is only the first message in this bounded response; "
     "the API does not expose the room's oldest retained sequence"
+)
+TCLK_WARNING = (
+    "tclk/1 frame detected: Safety Lens only makes the record safe to display; "
+    "it does not verify Ed25519 signatures, transcript completeness, state "
+    "transitions, deadlines, or settlement-rail evidence, so this is not a deal audit"
 )
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
@@ -70,8 +78,10 @@ class Finding:
     author: str
     identity: str
     proof: str
+    authenticity: str
     risk: str
     flags: list[str]
+    protocol: str | None
     text: str
 
 
@@ -81,7 +91,12 @@ def validate_room(room: str) -> str:
     return room
 
 
-def read_path(path: str, timeout: float = 20.0, retries: int = 2) -> bytes:
+def read_path(
+    path: str,
+    timeout: float = 20.0,
+    retries: int = 2,
+    response_metadata: dict[str, Any] | None = None,
+) -> bytes:
     """Fetch only a caller-built path from the pinned Technocore origin."""
     if not path.startswith("/") or "://" in path or "\\" in path:
         raise ValueError("only an absolute path on the pinned origin is allowed")
@@ -95,6 +110,14 @@ def read_path(path: str, timeout: float = 20.0, retries: int = 2) -> bytes:
             # urllib follows redirects by default, including cross-origin ones. A read
             # endpoint should never be allowed to expand the pinned network boundary.
             with OPENER.open(request, timeout=timeout) as response:
+                if response_metadata is not None:
+                    response_metadata.update(
+                        {
+                            "cache_control": response.headers.get("Cache-Control"),
+                            "age": response.headers.get("Age"),
+                            "cache_status": response.headers.get("CF-Cache-Status"),
+                        }
+                    )
                 body = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise RuntimeError(
@@ -108,8 +131,12 @@ def read_path(path: str, timeout: float = 20.0, retries: int = 2) -> bytes:
     raise RuntimeError(f"Technocore read failed after {retries + 1} attempts: {last_error}")
 
 
-def read_json(path: str, **kwargs: Any) -> dict[str, Any]:
-    raw = read_path(path, **kwargs)
+def read_json(
+    path: str,
+    response_metadata: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    raw = read_path(path, response_metadata=response_metadata, **kwargs)
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -118,6 +145,60 @@ def read_json(path: str, **kwargs: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RuntimeError("expected a JSON object")
     return value
+
+
+def cache_info(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Normalize untrusted intermediary headers into bounded display metadata."""
+    cache_control = metadata.get("cache_control")
+    if not isinstance(cache_control, str):
+        cache_control = None
+
+    directives: dict[str, int] = {}
+    if cache_control:
+        for name in ("s-maxage", "max-age", "stale-while-revalidate"):
+            match = re.search(
+                rf"(?:^|,)\s*{re.escape(name)}=(\d{{1,20}})\b", cache_control
+            )
+            if match:
+                directives[name] = min(int(match.group(1)), 10**9)
+
+    age_text = metadata.get("age")
+    age_seconds = (
+        min(int(age_text), 10**9)
+        if isinstance(age_text, str) and age_text.isdigit() and len(age_text) <= 20
+        else None
+    )
+    shared_fresh = directives.get("s-maxage", directives.get("max-age"))
+    stale_while_revalidate = directives.get("stale-while-revalidate")
+    maximum_lag = None
+    if shared_fresh is not None:
+        maximum_lag = shared_fresh + (stale_while_revalidate or 0)
+
+    cache_status = metadata.get("cache_status")
+    if not isinstance(cache_status, str):
+        cache_status = None
+    return {
+        "cache_control": defang(cache_control) if cache_control else None,
+        "cache_status": defang(cache_status) if cache_status else None,
+        "age_seconds": age_seconds,
+        "shared_fresh_seconds": shared_fresh,
+        "stale_while_revalidate_seconds": stale_while_revalidate,
+        "maximum_policy_lag_seconds": maximum_lag,
+    }
+
+
+def cache_summary(info: dict[str, Any]) -> str:
+    details = []
+    maximum_lag = info.get("maximum_policy_lag_seconds")
+    if isinstance(maximum_lag, int):
+        details.append(f"policy_lag<={maximum_lag}s")
+    age = info.get("age_seconds")
+    if isinstance(age, int):
+        details.append(f"age={age}s")
+    status = info.get("cache_status")
+    if isinstance(status, str):
+        details.append(f"cache={status}")
+    return " ".join(details) if details else "cache policy unavailable"
 
 
 def object_list(payload: dict[str, Any], field: str) -> list[dict[str, Any]]:
@@ -188,6 +269,10 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     raw_text = string_field(message, "text")
     author = string_field(message, "from")
     flags: list[str] = []
+    protocol = "tclk/1" if raw_text.startswith("tclk1 ") else None
+
+    if protocol:
+        flags.append("tclk-frame")
 
     if URL_RE.search(raw_text):
         flags.append("contains-url")
@@ -213,16 +298,20 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     if signed_lane and "sig" not in message:
         identity = "signed-lane-did"
         proof = "legacy-no-signature"
+        authenticity = "server-accepted-legacy-unverifiable"
     elif signed_lane and isinstance(signature, str) and SIG_RE.fullmatch(signature):
         identity = "signed-lane-did"
         proof = "signature-present-unverified"
+        authenticity = "server-accepted-signature-unverified"
     elif signed_lane:
         identity = "self-asserted"
         proof = "malformed-signature"
+        authenticity = "invalid"
         flags.append("malformed-signature")
     else:
         identity = "self-asserted"
         proof = "not-applicable"
+        authenticity = "self-asserted"
     if identity == "self-asserted":
         flags.append("unsigned-author")
 
@@ -241,8 +330,10 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         author=defang(author),
         identity=identity,
         proof=proof,
+        authenticity=authenticity,
         risk=risk,
         flags=flags,
+        protocol=protocol,
         text=defang(raw_text),
     )
 
@@ -255,7 +346,9 @@ def room_path(room: str, limit: int) -> str:
 
 
 def print_room(room: str, limit: int, json_output: bool) -> None:
-    payload = read_json(room_path(room, limit))
+    response_metadata: dict[str, Any] = {}
+    payload = read_json(room_path(room, limit), response_metadata=response_metadata)
+    response_cache = cache_info(response_metadata)
     response_room = string_field(payload, "room")
     if response_room != room:
         raise RuntimeError(f"expected room {room!r}, received {response_room!r}")
@@ -277,6 +370,9 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
         for previous, current in zip(findings, findings[1:])
     ):
         raise RuntimeError("room message sequences are not strictly increasing")
+    protocol_warnings = (
+        [TCLK_WARNING] if any(item.protocol == "tclk/1" for item in findings) else []
+    )
     if json_output:
         print(
             json.dumps(
@@ -286,8 +382,17 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
                     "count": count,
                     "first_seq": first_seq,
                     "last_seq": last_seq,
+                    "freshness_warning": ROOM_FRESHNESS_WARNING,
+                    "cache": response_cache,
                     "retained_floor_warning": RETAINED_FLOOR_WARNING,
-                    "findings": [asdict(item) for item in findings],
+                    "risk_semantics": (
+                        "risk is a content-pattern heuristic, not an authenticity verdict"
+                    ),
+                    "cryptographic_verification": False,
+                    "protocol_warnings": protocol_warnings,
+                    "findings": [
+                        {**asdict(item), "content_risk": item.risk} for item in findings
+                    ],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -299,12 +404,18 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
         f"window={first_seq}..{last_seq} newest_limit={limit} "
         "(all content is untrusted)"
     )
+    print(
+        f"freshness warning: {ROOM_FRESHNESS_WARNING}; "
+        f"{cache_summary(response_cache)}"
+    )
     print(f"retention warning: {RETAINED_FLOOR_WARNING}")
+    for warning in protocol_warnings:
+        print(f"protocol warning: {warning}")
     for item in findings:
         flags = ",".join(item.flags) if item.flags else "none"
         print(
-            f"[{item.seq}] {item.risk:6} {item.identity:13} "
-            f"proof={item.proof} flags={flags}"
+            f"[{item.seq}] content_risk={item.risk:6} authenticity={item.authenticity} "
+            f"identity={item.identity} proof={item.proof} flags={flags}"
         )
         print(f"  from={item.author}")
         print(f"  {item.text}")
@@ -313,7 +424,11 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
 def print_rooms(limit: int, json_output: bool) -> None:
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")
-    payload = read_json(f"/rooms?format=json&limit={limit}")
+    response_metadata: dict[str, Any] = {}
+    payload = read_json(
+        f"/rooms?format=json&limit={limit}", response_metadata=response_metadata
+    )
+    response_cache = cache_info(response_metadata)
     rows = []
     for item in object_list(payload, "rooms"):
         # Names and topics are caller-controlled strings, but their JSON types are
@@ -332,13 +447,20 @@ def print_rooms(limit: int, json_output: bool) -> None:
     if json_output:
         print(
             json.dumps(
-                {"freshness_warning": ROOMS_FRESHNESS_WARNING, "rooms": rows},
+                {
+                    "freshness_warning": ROOMS_FRESHNESS_WARNING,
+                    "cache": response_cache,
+                    "rooms": rows,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return
-    print(f"freshness warning: {ROOMS_FRESHNESS_WARNING}")
+    print(
+        f"freshness warning: {ROOMS_FRESHNESS_WARNING}; "
+        f"{cache_summary(response_cache)}"
+    )
     print("room names and topics are untrusted strings")
     for row in rows:
         print(f"{row['room']:<48} seq={row['last_seq']} idle={row['idle_seconds']}s")
