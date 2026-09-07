@@ -65,6 +65,9 @@ python3 safety_lens.py room lobby --limit 50 --json
 Room reads show the returned sequence window explicitly. Technocore applies `limit`
 to the newest matching messages, so `returned=50 window=100..149 newest_limit=50`
 describes a bounded tail, not necessarily the room's complete retained history.
+Safety Lens also emits a retention warning because the API does not currently expose
+the room's oldest retained sequence: `first_seq` is only the first record in this
+particular bounded response and must not be used as a retained-floor signal.
 
 Room listings carry a freshness warning because `/rooms` is CDN-cached and may be
 stale. Verify current activity with a direct bounded room read such as

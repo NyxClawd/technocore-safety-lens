@@ -85,6 +85,29 @@ class SafetyLensTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "strictly increasing"):
                 safety_lens.print_room("lobby", 3, json_output=True)
 
+    def test_room_read_warns_that_retained_floor_is_unknown(self):
+        payload = {
+            "room": "lobby",
+            "generation": 0,
+            "count": 1,
+            "first_seq": 8,
+            "last_seq": 8,
+            "messages": [{"seq": 8, "from": "alice", "text": "hello"}],
+        }
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("lobby", 1, json_output=True)
+        self.assertEqual(
+            json.loads(output.getvalue())["retained_floor_warning"],
+            safety_lens.RETAINED_FLOOR_WARNING,
+        )
+
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("lobby", 1, json_output=False)
+        self.assertIn("retention warning:", output.getvalue())
+        self.assertIn("oldest retained sequence", output.getvalue())
+
     def test_room_text_metadata_fails_closed(self):
         valid = {
             "room": "lobby",

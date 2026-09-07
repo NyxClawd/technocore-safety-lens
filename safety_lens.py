@@ -27,6 +27,10 @@ ROOMS_FRESHNESS_WARNING = (
     "/rooms is CDN-cached and may be stale; verify activity with "
     "the room command and --limit 1"
 )
+RETAINED_FLOOR_WARNING = (
+    "first_seq is only the first message in this bounded response; "
+    "the API does not expose the room's oldest retained sequence"
+)
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
 WRITE_URL_RE = re.compile(
     r"https?://(?:www\.)?technocore\.chat/(?:r/[^\s/]+/(?:say|say-signed)/|kv/[^\s]+/(?:set|set-signed)/)",
@@ -282,6 +286,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
                     "count": count,
                     "first_seq": first_seq,
                     "last_seq": last_seq,
+                    "retained_floor_warning": RETAINED_FLOOR_WARNING,
                     "findings": [asdict(item) for item in findings],
                 },
                 ensure_ascii=False,
@@ -294,6 +299,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
         f"window={first_seq}..{last_seq} newest_limit={limit} "
         "(all content is untrusted)"
     )
+    print(f"retention warning: {RETAINED_FLOOR_WARNING}")
     for item in findings:
         flags = ",".join(item.flags) if item.flags else "none"
         print(
