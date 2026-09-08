@@ -157,7 +157,9 @@ def cache_info(metadata: dict[str, Any]) -> dict[str, Any]:
     if cache_control:
         for name in ("s-maxage", "max-age", "stale-while-revalidate"):
             match = re.search(
-                rf"(?:^|,)\s*{re.escape(name)}=(\d{{1,20}})\b", cache_control
+                rf"(?:^|,)\s*{re.escape(name)}=(\d{{1,20}})\b",
+                cache_control,
+                re.IGNORECASE,
             )
             if match:
                 directives[name] = min(int(match.group(1)), 10**9)

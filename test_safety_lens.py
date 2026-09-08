@@ -150,6 +150,19 @@ class SafetyLensTests(unittest.TestCase):
         self.assertIsNone(rendered["age_seconds"])
         self.assertEqual(rendered["cache_status"], "HIT\\u000aforged")
 
+    def test_cache_directive_names_are_case_insensitive(self):
+        rendered = safety_lens.cache_info(
+            {
+                "cache_control": "public, S-MaxAge=5, Stale-While-Revalidate=25",
+                "age": "4",
+                "cache_status": "HIT",
+            }
+        )
+
+        self.assertEqual(rendered["shared_fresh_seconds"], 5)
+        self.assertEqual(rendered["stale_while_revalidate_seconds"], 25)
+        self.assertEqual(rendered["maximum_policy_lag_seconds"], 30)
+
     def test_room_text_metadata_fails_closed(self):
         valid = {
             "room": "lobby",
