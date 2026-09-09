@@ -9,6 +9,52 @@ DID = "did:key:z6MkjCCwPSCo9uhBs2ufngg27qdt5jqEZjLohXxSMFotqazm"
 
 
 class SafetyLensTests(unittest.TestCase):
+    def test_ed25519_verifier_matches_rfc_8032_and_rejects_tampering(self):
+        public_key = bytes.fromhex(
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+        )
+        signature = bytes.fromhex(
+            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+            "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+        )
+
+        self.assertTrue(safety_lens.verify_ed25519(public_key, signature, b""))
+        self.assertFalse(safety_lens.verify_ed25519(public_key, signature, b"x"))
+
+    def test_retained_record_signature_is_verified_from_its_did_and_room(self):
+        message = {
+            "seq": 1,
+            "from": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "nonce": 1,
+            "sig": (
+                "27I8Pb0K7f5AxWlYEE1m0UeNdj4Ko9dcOp_DVHmNFjKbKsAJ2Fw0O4af"
+                "LqiQdu9kV9OYQcUp7Y-dUb-tKUaKAQ"
+            ),
+            "text": "hello",
+        }
+
+        finding = safety_lens.analyze_message(message, "lobby")
+        self.assertEqual(finding.proof, "signature-verified")
+        self.assertEqual(finding.authenticity, "cryptographically-verified")
+
+        finding = safety_lens.analyze_message({**message, "text": "tampered"}, "lobby")
+        self.assertEqual(finding.proof, "invalid-signature")
+        self.assertEqual(finding.risk, "high")
+
+    def test_retained_signature_recovers_a_lost_leading_zero_nonce_spelling(self):
+        message = {
+            "seq": 1,
+            "from": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw",
+            "nonce": 1,
+            "sig": (
+                "H46Gxwez9cbtdSYPk2sXdD2_CWZHKMbbDcXA8GlVtaNfsck-cE8-JTAq8tz2"
+                "cOBb-2t2RU7utgGalQH81uspDA"
+            ),
+            "text": "hello",
+        }
+
+        self.assertTrue(safety_lens.verify_record_signature("lobby", message))
+
     def test_collection_fields_fail_closed_on_malformed_shapes(self):
         malformed_values = (None, {}, "not-a-list", ["not-an-object"])
         for value in malformed_values:
@@ -273,11 +319,13 @@ class SafetyLensTests(unittest.TestCase):
         self.assertEqual(finding.risk, "review")
         self.assertIn("tclk-frame", finding.flags)
 
-        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+        with mock.patch.object(safety_lens, "read_json", return_value=payload), mock.patch.object(
+            safety_lens, "verify_record_signature", return_value=True
+        ):
             with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
                 safety_lens.print_room("tclk-offers", 1, json_output=True)
         rendered = json.loads(output.getvalue())
-        self.assertFalse(rendered["cryptographic_verification"])
+        self.assertTrue(rendered["cryptographic_verification"])
         self.assertEqual(rendered["findings"][0]["content_risk"], "review")
         self.assertIn("not a deal audit", rendered["protocol_warnings"][0])
 

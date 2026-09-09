@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -35,8 +37,8 @@ RETAINED_FLOOR_WARNING = (
     "the API does not expose the room's oldest retained sequence"
 )
 TCLK_WARNING = (
-    "tclk/1 frame detected: Safety Lens only makes the record safe to display; "
-    "it does not verify Ed25519 signatures, transcript completeness, state "
+    "tclk/1 frame detected: Safety Lens verifies only the outer room-record signature; "
+    "it does not verify embedded signatures, transcript completeness, state "
     "transitions, deadlines, or settlement-rail evidence, so this is not a deal audit"
 )
 URL_RE = re.compile(r"https?://[^\s<>\]\[\)\(]+", re.IGNORECASE)
@@ -52,6 +54,16 @@ INJECTION_PATTERNS = (
     re.compile(r"\b(?:fetch|open|visit|click)\b.{0,30}https?://", re.IGNORECASE),
 )
 DISPLAY_BREAK_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
+
+# RFC 8032's Edwards25519 parameters. Verification is implemented locally so the
+# read-only lens remains zero-dependency and never shells out with untrusted input.
+ED25519_P = 2**255 - 19
+ED25519_L = 2**252 + 27742317777372353535851937790883648493
+ED25519_D = (-121665 * pow(121666, ED25519_P - 2, ED25519_P)) % ED25519_P
+ED25519_I = pow(2, (ED25519_P - 1) // 4, ED25519_P)
+ED25519_IDENTITY = (0, 1)
+BASE58BTC = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+BASE58BTC_INDEX = {char: index for index, char in enumerate(BASE58BTC)}
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -254,6 +266,139 @@ def valid_signed_nonce(value: Any) -> bool:
     )
 
 
+def decode_did_key(did: str) -> bytes:
+    """Return a canonical Ed25519 did:key's raw public key, or raise ValueError."""
+    if not DID_RE.fullmatch(did):
+        raise ValueError("malformed Ed25519 did:key")
+    encoded = did.removeprefix("did:key:z")
+    number = 0
+    for char in encoded:
+        number = number * 58 + BASE58BTC_INDEX[char]
+    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big")
+    if len(decoded) != 34 or not decoded.startswith(b"\xed\x01"):
+        raise ValueError("did:key is not an Ed25519 public key")
+    return decoded[2:]
+
+
+def _ed25519_point_add(
+    left: tuple[int, int], right: tuple[int, int]
+) -> tuple[int, int]:
+    x1, y1 = left
+    x2, y2 = right
+    product = ED25519_D * x1 * x2 * y1 * y2 % ED25519_P
+    return (
+        (x1 * y2 + y1 * x2) * pow(1 + product, ED25519_P - 2, ED25519_P)
+        % ED25519_P,
+        (y1 * y2 + x1 * x2) * pow(1 - product, ED25519_P - 2, ED25519_P)
+        % ED25519_P,
+    )
+
+
+def _ed25519_scalar_multiply(
+    point: tuple[int, int], scalar: int
+) -> tuple[int, int]:
+    result = (0, 1, 1, 0)
+    addend = (point[0], point[1], 1, point[0] * point[1] % ED25519_P)
+    while scalar:
+        if scalar & 1:
+            result = _ed25519_extended_add(result, addend)
+        addend = _ed25519_extended_double(addend)
+        scalar >>= 1
+    inverse_z = pow(result[2], ED25519_P - 2, ED25519_P)
+    return result[0] * inverse_z % ED25519_P, result[1] * inverse_z % ED25519_P
+
+
+def _ed25519_extended_add(
+    left: tuple[int, int, int, int], right: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    x1, y1, z1, t1 = left
+    x2, y2, z2, t2 = right
+    a = (y1 - x1) * (y2 - x2) % ED25519_P
+    b = (y1 + x1) * (y2 + x2) % ED25519_P
+    c = 2 * ED25519_D * t1 * t2 % ED25519_P
+    d = 2 * z1 * z2 % ED25519_P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return e * f % ED25519_P, g * h % ED25519_P, f * g % ED25519_P, e * h % ED25519_P
+
+
+def _ed25519_extended_double(
+    point: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    x, y, z, _ = point
+    a, b, c = x * x % ED25519_P, y * y % ED25519_P, 2 * z * z % ED25519_P
+    d = -a
+    e = (x + y) * (x + y) - a - b
+    g, f, h = d + b, d + b - c, d - b
+    return e * f % ED25519_P, g * h % ED25519_P, f * g % ED25519_P, e * h % ED25519_P
+
+
+def _ed25519_decode_point(encoded: bytes) -> tuple[int, int]:
+    if len(encoded) != 32:
+        raise ValueError("Ed25519 point must be 32 bytes")
+    value = int.from_bytes(encoded, "little")
+    sign = value >> 255
+    y = value & ((1 << 255) - 1)
+    if y >= ED25519_P:
+        raise ValueError("non-canonical Ed25519 point")
+    x_squared = (y * y - 1) * pow(
+        ED25519_D * y * y + 1, ED25519_P - 2, ED25519_P
+    ) % ED25519_P
+    x = pow(x_squared, (ED25519_P + 3) // 8, ED25519_P)
+    if x * x % ED25519_P != x_squared:
+        x = x * ED25519_I % ED25519_P
+    if x * x % ED25519_P != x_squared:
+        raise ValueError("point is not on Edwards25519")
+    if x & 1 != sign:
+        x = ED25519_P - x
+    if x == 0 and sign:
+        raise ValueError("non-canonical Ed25519 sign bit")
+    point = (x, y)
+    # Match strict Ed25519 verifiers: accept only the prime-order subgroup and
+    # reject the identity, rather than permitting small-order equation tricks.
+    if point == ED25519_IDENTITY or _ed25519_scalar_multiply(point, ED25519_L) != ED25519_IDENTITY:
+        raise ValueError("Ed25519 point is not in the prime-order subgroup")
+    return point
+
+
+def verify_ed25519(public_key: bytes, signature: bytes, message: bytes) -> bool:
+    """Strict RFC 8032 verification without an optional crypto dependency."""
+    if len(public_key) != 32 or len(signature) != 64:
+        return False
+    scalar = int.from_bytes(signature[32:], "little")
+    if scalar >= ED25519_L:
+        return False
+    try:
+        public_point = _ed25519_decode_point(public_key)
+        nonce_point = _ed25519_decode_point(signature[:32])
+    except ValueError:
+        return False
+    base_point = _ed25519_decode_point(bytes.fromhex("58" + "66" * 31))
+    challenge = int.from_bytes(
+        hashlib.sha512(signature[:32] + public_key + message).digest(), "little"
+    ) % ED25519_L
+    return _ed25519_scalar_multiply(base_point, scalar) == _ed25519_point_add(
+        nonce_point, _ed25519_scalar_multiply(public_point, challenge)
+    )
+
+
+def verify_record_signature(room: str, message: dict[str, Any]) -> bool:
+    """Verify a retained signature, including nonce spellings lost by int storage."""
+    public_key = decode_did_key(message["from"])
+    signature = base64.urlsafe_b64decode(message["sig"] + "==")
+    nonce = str(message["nonce"])
+    # The server currently accepts leading-zero nonce text but stores it as an int.
+    # Try every accepted spelling so a valid retained record is not called forged.
+    nonce_spellings = (nonce.zfill(width) for width in range(len(nonce), 20))
+    return any(
+        verify_ed25519(
+            public_key,
+            signature,
+            f"{room}|{spelling}|{message['text']}".encode("utf-8"),
+        )
+        for spelling in nonce_spellings
+    )
+
+
 def defang(text: str) -> str:
     """Make URLs non-clickable and controls visible before terminal/model display."""
     visible: list[str] = []
@@ -266,7 +411,7 @@ def defang(text: str) -> str:
     return URL_RE.sub(lambda match: match.group(0).replace("://", "[:]//"), "".join(visible))
 
 
-def analyze_message(message: dict[str, Any]) -> Finding:
+def analyze_message(message: dict[str, Any], room: str | None = None) -> Finding:
     seq = nonnegative_int(message, "seq")
     raw_text = string_field(message, "text")
     author = string_field(message, "from")
@@ -289,8 +434,7 @@ def analyze_message(message: dict[str, Any]) -> Finding:
     ):
         flags.append("hidden-control")
     # New signed records retain their signature, while records written before v0.11.0
-    # legitimately have only a DID and nonce. Distinguish the two without claiming that
-    # merely checking a signature's encoding is cryptographic verification.
+    # legitimately have only a DID and nonce. Keep the legacy boundary explicit.
     nonce = message.get("nonce")
     signed_lane = (
         bool(DID_RE.fullmatch(author))
@@ -302,9 +446,19 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         proof = "legacy-no-signature"
         authenticity = "server-accepted-legacy-unverifiable"
     elif signed_lane and isinstance(signature, str) and SIG_RE.fullmatch(signature):
-        identity = "signed-lane-did"
-        proof = "signature-present-unverified"
-        authenticity = "server-accepted-signature-unverified"
+        if room is None:
+            identity = "signed-lane-did"
+            proof = "signature-present-unverified"
+            authenticity = "server-accepted-signature-unverified"
+        elif verify_record_signature(room, message):
+            identity = "signed-lane-did"
+            proof = "signature-verified"
+            authenticity = "cryptographically-verified"
+        else:
+            identity = "self-asserted"
+            proof = "invalid-signature"
+            authenticity = "invalid"
+            flags.append("invalid-signature")
     elif signed_lane:
         identity = "self-asserted"
         proof = "malformed-signature"
@@ -322,6 +476,7 @@ def analyze_message(message: dict[str, Any]) -> Finding:
         "instruction-like",
         "hidden-control",
         "malformed-signature",
+        "invalid-signature",
     }
     risk = "high" if severe.intersection(flags) else "review" if flags else "low"
     return Finding(
@@ -355,7 +510,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
     if response_room != room:
         raise RuntimeError(f"expected room {room!r}, received {response_room!r}")
     generation = nonnegative_int(payload, "generation")
-    findings = [analyze_message(item) for item in object_list(payload, "messages")]
+    findings = [analyze_message(item, room) for item in object_list(payload, "messages")]
     count = nonnegative_int(payload, "count")
     first_seq = optional_nonnegative_int(payload, "first_seq")
     last_seq = nonnegative_int(payload, "last_seq")
@@ -390,7 +545,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
                     "risk_semantics": (
                         "risk is a content-pattern heuristic, not an authenticity verdict"
                     ),
-                    "cryptographic_verification": False,
+                    "cryptographic_verification": True,
                     "protocol_warnings": protocol_warnings,
                     "findings": [
                         {**asdict(item), "content_risk": item.risk} for item in findings
