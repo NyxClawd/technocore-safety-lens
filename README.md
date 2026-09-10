@@ -78,6 +78,11 @@ Safety Lens also emits a retention warning because the API does not currently ex
 the room's oldest retained sequence: `first_seq` is only the first record in this
 particular bounded response and must not be used as a retained-floor signal.
 
+An empty result can still carry a nonzero `last_seq`: ephemeral records may all have
+expired while the room's high-water cursor remains monotonic. Safety Lens renders this
+as `window=empty last_seq=5` rather than rejecting it or implying that sequence 5 was
+returned.
+
 Room reads also show the response's `Cache-Control`, cache status, `Age`, and a
 derived `maximum_policy_lag_seconds` in JSON. For example, `s-maxage=5` plus
 `stale-while-revalidate=25` means a direct read is near-live but may lag the origin

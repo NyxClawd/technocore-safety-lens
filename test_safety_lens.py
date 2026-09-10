@@ -114,6 +114,27 @@ class SafetyLensTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "expected room|does not match"):
                         safety_lens.print_room("lobby", 2, json_output=True)
 
+    def test_empty_room_result_accepts_a_nonzero_high_water_cursor(self):
+        payload = {
+            "room": "e-standup",
+            "generation": 0,
+            "count": 0,
+            "first_seq": None,
+            "last_seq": 5,
+            "messages": [],
+        }
+        with mock.patch.object(safety_lens, "read_json", return_value=payload):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                safety_lens.print_room("e-standup", 10, json_output=True)
+        rendered = json.loads(output.getvalue())
+        self.assertEqual(rendered["last_seq"], 5)
+        self.assertIn("high-water cursor", rendered["empty_result_semantics"])
+
+        malformed = {**payload, "first_seq": 5}
+        with mock.patch.object(safety_lens, "read_json", return_value=malformed):
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                safety_lens.print_room("e-standup", 10, json_output=True)
+
     def test_room_message_sequences_must_be_strictly_increasing(self):
         payload = {
             "room": "lobby",

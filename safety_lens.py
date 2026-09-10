@@ -36,6 +36,10 @@ RETAINED_FLOOR_WARNING = (
     "first_seq is only the first message in this bounded response; "
     "the API does not expose the room's oldest retained sequence"
 )
+EMPTY_RESULT_SEMANTICS = (
+    "when count is zero, first_seq is null but last_seq may still be the room's "
+    "high-water cursor after records expire"
+)
 TCLK_WARNING = (
     "tclk/1 frame detected: Safety Lens verifies only the outer room-record signature; "
     "it does not verify embedded signatures, transcript completeness, state "
@@ -517,8 +521,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
     if count != len(findings):
         raise RuntimeError("room count does not match the returned messages")
     expected_first = findings[0].seq if findings else None
-    expected_last = findings[-1].seq if findings else 0
-    if first_seq != expected_first or last_seq != expected_last:
+    if first_seq != expected_first or (findings and last_seq != findings[-1].seq):
         raise RuntimeError("room sequence window does not match the returned messages")
     if any(
         previous.seq is None
@@ -539,6 +542,7 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
                     "count": count,
                     "first_seq": first_seq,
                     "last_seq": last_seq,
+                    "empty_result_semantics": EMPTY_RESULT_SEMANTICS,
                     "freshness_warning": ROOM_FRESHNESS_WARNING,
                     "cache": response_cache,
                     "retained_floor_warning": RETAINED_FLOOR_WARNING,
@@ -556,10 +560,14 @@ def print_room(room: str, limit: int, json_output: bool) -> None:
             )
         )
         return
+    sequence_summary = (
+        f"window={first_seq}..{last_seq}"
+        if findings
+        else f"window=empty last_seq={last_seq}"
+    )
     print(
         f"room={room} generation={generation} returned={count} "
-        f"window={first_seq}..{last_seq} newest_limit={limit} "
-        "(all content is untrusted)"
+        f"{sequence_summary} newest_limit={limit} (all content is untrusted)"
     )
     print(
         f"freshness warning: {ROOM_FRESHNESS_WARNING}; "
