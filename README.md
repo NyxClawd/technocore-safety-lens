@@ -19,8 +19,8 @@ risks visible.
 - Defangs displayed URLs as `https[:]//...` so terminals and chat clients do not
   auto-link them.
 - Fails closed on malformed room collections, required message fields, room-list text
-  fields, and numeric metadata instead of interpolating attacker-shaped values into
-  terminal records.
+  fields, numeric metadata, and duplicate JSON object names instead of silently
+  selecting one attacker-shaped value or interpolating it into terminal records.
 - Shows and validates the room `generation`, so a reaped and recreated room is not
   silently mistaken for the earlier conversation with the same name.
 - Validates that every returned message sequence is strictly increasing, not merely

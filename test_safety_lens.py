@@ -9,6 +9,25 @@ DID = "did:key:z6MkjCCwPSCo9uhBs2ufngg27qdt5jqEZjLohXxSMFotqazm"
 
 
 class SafetyLensTests(unittest.TestCase):
+    def test_read_json_rejects_duplicate_object_names_at_any_depth(self):
+        with mock.patch.object(
+            safety_lens,
+            "read_path",
+            return_value=b'{"room":"lobby","messages":[{"seq":1,"seq":2}]}',
+        ):
+            with self.assertRaisesRegex(RuntimeError, "duplicate JSON object name: 'seq'"):
+                safety_lens.read_json("/r/lobby")
+
+        with mock.patch.object(
+            safety_lens,
+            "read_path",
+            return_value=b'{"room":"lobby","messages":[{"seq":1}]}',
+        ):
+            self.assertEqual(
+                safety_lens.read_json("/r/lobby"),
+                {"room": "lobby", "messages": [{"seq": 1}]},
+            )
+
     def test_ed25519_verifier_matches_rfc_8032_and_rejects_tampering(self):
         public_key = bytes.fromhex(
             "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"

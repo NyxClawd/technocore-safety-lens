@@ -153,8 +153,17 @@ def read_json(
     **kwargs: Any,
 ) -> dict[str, Any]:
     raw = read_path(path, response_metadata=response_metadata, **kwargs)
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise RuntimeError(f"duplicate JSON object name: {key!r}")
+            value[key] = item
+        return value
+
     try:
-        value = json.loads(raw)
+        value = json.loads(raw, object_pairs_hook=unique_object)
     except json.JSONDecodeError as error:
         preview = raw[:80].decode("utf-8", "backslashreplace")
         raise RuntimeError(f"expected JSON, received {preview!r}") from error
